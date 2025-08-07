@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const auditModel = require("./auditModel");
 
 // Snippet Schema
 const snippetSchema = new mongoose.Schema(
@@ -38,171 +39,263 @@ snippetSchema.index({ userId: 1, keyword: 1 }, { unique: true });
 // Create the model
 const Snippet = mongoose.model("Snippet", snippetSchema);
 
-class SnippetModel {
-  // Get all snippets for a user
-  async getAllByUserId(userId) {
-    try {
-      const snippets = await Snippet.find({ userId })
-        .sort({ updatedAt: -1 })
-        .lean();
+/**
+ * Get all snippets for a user
+ */
+const getAllByUserId = async (userId) => {
+  try {
+    const snippets = await Snippet.find({ userId })
+      .sort({ updatedAt: -1 })
+      .lean();
 
-      return snippets.map((snippet) => ({
-        id: snippet._id.toString(),
-        keyword: snippet.keyword,
-        value: snippet.value,
-        usageCount: snippet.usageCount,
-        lastUsed: snippet.lastUsed,
-        createdAt: snippet.createdAt,
-        updatedAt: snippet.updatedAt,
-      }));
-    } catch (error) {
-      throw error;
-    }
+    return snippets.map((snippet) => ({
+      id: snippet._id.toString(),
+      keyword: snippet.keyword,
+      value: snippet.value,
+      usageCount: snippet.usageCount,
+      lastUsed: snippet.lastUsed,
+      createdAt: snippet.createdAt,
+      updatedAt: snippet.updatedAt,
+    }));
+  } catch (error) {
+    throw error;
   }
+};
 
-  // Create a new snippet
-  async create(userId, snippetData) {
-    try {
-      const { keyword, value, usageCount = 0, lastUsed = null } = snippetData;
+/**
+ * Create a new snippet
+ */
+const create = async (userId, snippetData) => {
+  try {
+    const { keyword, value, usageCount = 0, lastUsed = null } = snippetData;
 
-      const snippet = new Snippet({
-        userId,
-        keyword,
-        value,
-        usageCount,
-        lastUsed,
-      });
+    const snippet = new Snippet({
+      userId,
+      keyword,
+      value,
+      usageCount,
+      lastUsed,
+    });
 
-      const savedSnippet = await snippet.save();
+    const savedSnippet = await snippet.save();
 
-      return {
+    // Create audit log for snippet creation
+    await auditModel.createAuditLog({
+      userId: userId,
+      action: "create_snippet",
+      resource: "snippet",
+      resourceId: savedSnippet._id.toString(),
+      method: "POST",
+      url: "/api/snippets",
+      status: "success",
+      statusCode: 201,
+      details: {
+        operation: "create",
+        keyword: keyword,
+        valueLength: value.length,
+      },
+      requestBody: snippetData,
+      responseData: {
         id: savedSnippet._id.toString(),
         keyword: savedSnippet.keyword,
         value: savedSnippet.value,
-        usageCount: savedSnippet.usageCount,
-        lastUsed: savedSnippet.lastUsed,
-        createdAt: savedSnippet.createdAt,
-        updatedAt: savedSnippet.updatedAt,
-      };
-    } catch (error) {
-      // Handle duplicate key error
-      if (error.code === 11000) {
-        const duplicateError = new Error(
-          "A snippet with this keyword already exists"
-        );
-        duplicateError.code = "DUPLICATE_KEYWORD";
-        throw duplicateError;
-      }
-      throw error;
+      },
+    });
+
+    return {
+      id: savedSnippet._id.toString(),
+      keyword: savedSnippet.keyword,
+      value: savedSnippet.value,
+      usageCount: savedSnippet.usageCount,
+      lastUsed: savedSnippet.lastUsed,
+      createdAt: savedSnippet.createdAt,
+      updatedAt: savedSnippet.updatedAt,
+    };
+  } catch (error) {
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      const duplicateError = new Error(
+        "A snippet with this keyword already exists"
+      );
+      duplicateError.code = "DUPLICATE_KEYWORD";
+      throw duplicateError;
     }
+    throw error;
   }
+};
 
-  // Find snippet by ID and user ID
-  async findByIdAndUserId(snippetId, userId) {
-    try {
-      const snippet = await Snippet.findOne({
-        _id: snippetId,
-        userId,
-      }).lean();
+/**
+ * Find snippet by ID and user ID
+ */
+const findByIdAndUserId = async (snippetId, userId) => {
+  try {
+    const snippet = await Snippet.findOne({
+      _id: snippetId,
+      userId,
+    }).lean();
 
-      if (!snippet) {
-        return null;
-      }
-
-      return {
-        id: snippet._id.toString(),
-        keyword: snippet.keyword,
-        value: snippet.value,
-        usageCount: snippet.usageCount,
-        lastUsed: snippet.lastUsed,
-        createdAt: snippet.createdAt,
-        updatedAt: snippet.updatedAt,
-      };
-    } catch (error) {
-      throw error;
+    if (!snippet) {
+      return null;
     }
+
+    return {
+      id: snippet._id.toString(),
+      keyword: snippet.keyword,
+      value: snippet.value,
+      usageCount: snippet.usageCount,
+      lastUsed: snippet.lastUsed,
+      createdAt: snippet.createdAt,
+      updatedAt: snippet.updatedAt,
+    };
+  } catch (error) {
+    throw error;
   }
+};
 
-  // Delete a snippet
-  async deleteByIdAndUserId(snippetId, userId) {
-    try {
-      const result = await Snippet.deleteOne({
-        _id: snippetId,
-        userId,
-      });
+/**
+ * Delete a snippet
+ */
+const deleteByIdAndUserId = async (snippetId, userId) => {
+  try {
+    // Get snippet details before deletion for audit log
+    const snippet = await Snippet.findOne({
+      _id: snippetId,
+      userId,
+    }).lean();
 
-      return result.deletedCount > 0;
-    } catch (error) {
-      throw error;
-    }
-  }
+    const result = await Snippet.deleteOne({
+      _id: snippetId,
+      userId,
+    });
 
-  // Increment usage count
-  async incrementUsage(snippetId, userId) {
-    try {
-      const currentTime = new Date();
-
-      const result = await Snippet.findOneAndUpdate(
-        { _id: snippetId, userId },
-        {
-          $inc: { usageCount: 1 },
-          lastUsed: currentTime,
+    if (result.deletedCount > 0 && snippet) {
+      // Create audit log for snippet deletion
+      await auditModel.createAuditLog({
+        userId: userId,
+        action: "delete_snippet",
+        resource: "snippet",
+        resourceId: snippetId,
+        method: "DELETE",
+        url: `/api/snippets/${snippetId}`,
+        status: "success",
+        statusCode: 200,
+        details: {
+          operation: "delete",
+          keyword: snippet.keyword,
+          usageCount: snippet.usageCount,
         },
-        { new: true }
-      ).lean();
+        responseData: {
+          message: "Snippet deleted successfully",
+        },
+      });
+    }
 
-      if (!result) {
-        return null;
-      }
+    return result.deletedCount > 0;
+  } catch (error) {
+    throw error;
+  }
+};
 
-      return {
+/**
+ * Increment usage count
+ */
+const incrementUsage = async (snippetId, userId) => {
+  try {
+    const currentTime = new Date();
+
+    const result = await Snippet.findOneAndUpdate(
+      { _id: snippetId, userId },
+      {
+        $inc: { usageCount: 1 },
+        lastUsed: currentTime,
+      },
+      { new: true }
+    ).lean();
+
+    if (!result) {
+      return null;
+    }
+
+    // Create audit log for usage increment
+    await auditModel.createAuditLog({
+      userId: userId,
+      action: "increment_snippet_usage",
+      resource: "snippet",
+      resourceId: snippetId,
+      method: "POST",
+      url: `/api/snippets/${snippetId}/usage`,
+      status: "success",
+      statusCode: 200,
+      details: {
+        operation: "increment",
+        keyword: result.keyword,
+        newUsageCount: result.usageCount,
+      },
+      responseData: {
         usageCount: result.usageCount,
         lastUsed: result.lastUsed,
-      };
-    } catch (error) {
-      throw error;
-    }
+      },
+    });
+
+    return {
+      usageCount: result.usageCount,
+      lastUsed: result.lastUsed,
+    };
+  } catch (error) {
+    throw error;
   }
+};
 
-  // Check if keyword exists for user (for duplicate prevention)
-  async findByKeywordAndUserId(keyword, userId) {
-    try {
-      const snippet = await Snippet.findOne({
-        keyword,
-        userId,
-      }).select("_id");
+/**
+ * Check if keyword exists for user (for duplicate prevention)
+ */
+const findByKeywordAndUserId = async (keyword, userId) => {
+  try {
+    const snippet = await Snippet.findOne({
+      keyword,
+      userId,
+    }).select("_id");
 
-      return !!snippet;
-    } catch (error) {
-      throw error;
-    }
+    return !!snippet;
+  } catch (error) {
+    throw error;
   }
+};
 
-  // Get snippet by keyword and user ID (useful for updates)
-  async findByKeywordAndUserIdFull(keyword, userId) {
-    try {
-      const snippet = await Snippet.findOne({
-        keyword,
-        userId,
-      }).lean();
+/**
+ * Get snippet by keyword and user ID (useful for updates)
+ */
+const findByKeywordAndUserIdFull = async (keyword, userId) => {
+  try {
+    const snippet = await Snippet.findOne({
+      keyword,
+      userId,
+    }).lean();
 
-      if (!snippet) {
-        return null;
-      }
-
-      return {
-        id: snippet._id.toString(),
-        keyword: snippet.keyword,
-        value: snippet.value,
-        usageCount: snippet.usageCount,
-        lastUsed: snippet.lastUsed,
-        createdAt: snippet.createdAt,
-        updatedAt: snippet.updatedAt,
-      };
-    } catch (error) {
-      throw error;
+    if (!snippet) {
+      return null;
     }
-  }
-}
 
-module.exports = new SnippetModel();
+    return {
+      id: snippet._id.toString(),
+      keyword: snippet.keyword,
+      value: snippet.value,
+      usageCount: snippet.usageCount,
+      lastUsed: snippet.lastUsed,
+      createdAt: snippet.createdAt,
+      updatedAt: snippet.updatedAt,
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+module.exports = {
+  getAllByUserId,
+  create,
+  findByIdAndUserId,
+  deleteByIdAndUserId,
+  incrementUsage,
+  findByKeywordAndUserId,
+  findByKeywordAndUserIdFull,
+};

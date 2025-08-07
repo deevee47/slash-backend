@@ -1,4 +1,4 @@
-const App = require("./src/app");
+const { createApp, initialize, cleanup } = require("./src/app");
 const logger = require("./src/utils/logger");
 const {
   handleUnhandledRejection,
@@ -13,11 +13,13 @@ process.on("unhandledRejection", handleUnhandledRejection);
 
 async function startServer() {
   try {
-    // Create and initialize the application
-    const app = new App();
-    await app.initialize();
+    // Initialize the application
+    await initialize();
 
-    const server = app.getExpressApp().listen(PORT, () => {
+    // Create the Express app
+    const app = createApp();
+
+    const server = app.listen(PORT, () => {
       logger.info(`Server running on http://localhost:${PORT}`, {
         port: PORT,
         environment: process.env.NODE_ENV || "development",
@@ -30,7 +32,7 @@ async function startServer() {
 
       server.close(async () => {
         try {
-          await app.cleanup();
+          await cleanup();
           logger.info("Graceful shutdown completed");
           process.exit(0);
         } catch (error) {
