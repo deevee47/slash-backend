@@ -9,9 +9,6 @@ node_modules/
 *.sqlite
 *.sqlite3
 
-# Firebase service account keys
-*serviceAccountKey.json
-*service-account-*.json
 
 # Logs
 *.log
