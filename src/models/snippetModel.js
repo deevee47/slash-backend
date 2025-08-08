@@ -14,6 +14,10 @@ const snippetSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    iv: {
+      type: String,
+      required: true,
+    },
     value: {
       type: String,
       required: true,
@@ -26,6 +30,9 @@ const snippetSchema = new mongoose.Schema(
     lastUsed: {
       type: Date,
       default: null,
+    },
+    orignalValue: {
+      type: String,
     },
   },
   {
@@ -51,6 +58,7 @@ const getAllByUserId = async (userId) => {
     return snippets.map((snippet) => ({
       id: snippet._id.toString(),
       keyword: snippet.keyword,
+      iv: snippet.iv,
       value: snippet.value,
       usageCount: snippet.usageCount,
       lastUsed: snippet.lastUsed,
@@ -67,14 +75,23 @@ const getAllByUserId = async (userId) => {
  */
 const create = async (userId, snippetData) => {
   try {
-    const { keyword, value, usageCount = 0, lastUsed = null } = snippetData;
+    const {
+      keyword,
+      value,
+      iv,
+      usageCount = 0,
+      lastUsed = null,
+      orignalValue,
+    } = snippetData;
 
     const snippet = new Snippet({
       userId,
       keyword,
+      iv,
       value,
       usageCount,
       lastUsed,
+      orignalValue: orignalValue,
     });
 
     const savedSnippet = await snippet.save();
@@ -105,6 +122,7 @@ const create = async (userId, snippetData) => {
     return {
       id: savedSnippet._id.toString(),
       keyword: savedSnippet.keyword,
+      iv: savedSnippet.iv,
       value: savedSnippet.value,
       usageCount: savedSnippet.usageCount,
       lastUsed: savedSnippet.lastUsed,
@@ -141,6 +159,7 @@ const findByIdAndUserId = async (snippetId, userId) => {
     return {
       id: snippet._id.toString(),
       keyword: snippet.keyword,
+      iv: snippet.iv,
       value: snippet.value,
       usageCount: snippet.usageCount,
       lastUsed: snippet.lastUsed,
@@ -279,11 +298,72 @@ const findByKeywordAndUserIdFull = async (keyword, userId) => {
     return {
       id: snippet._id.toString(),
       keyword: snippet.keyword,
+      iv: snippet.iv,
       value: snippet.value,
       usageCount: snippet.usageCount,
       lastUsed: snippet.lastUsed,
       createdAt: snippet.createdAt,
       updatedAt: snippet.updatedAt,
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Update a snippet by ID and user ID
+ */
+const updateByIdAndUserId = async (snippetId, userId, updateData) => {
+  try {
+    const { keyword, value, iv, orignalValue } = updateData;
+
+    const result = await Snippet.findOneAndUpdate(
+      { _id: snippetId, userId },
+      {
+        keyword,
+        value,
+        iv,
+        orignalValue,
+      },
+      { new: true }
+    ).lean();
+
+    if (!result) {
+      return null;
+    }
+
+    // Create audit log for snippet update
+    await auditModel.createAuditLog({
+      userId: userId,
+      action: "update_snippet",
+      resource: "snippet",
+      resourceId: snippetId,
+      method: "PUT",
+      url: `/api/snippets/${snippetId}`,
+      status: "success",
+      statusCode: 200,
+      details: {
+        operation: "update",
+        keyword: keyword,
+        valueLength: value.length,
+      },
+      requestBody: updateData,
+      responseData: {
+        id: result._id.toString(),
+        keyword: result.keyword,
+        value: result.value,
+      },
+    });
+
+    return {
+      id: result._id.toString(),
+      keyword: result.keyword,
+      iv: result.iv,
+      value: result.value,
+      usageCount: result.usageCount,
+      lastUsed: result.lastUsed,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
     };
   } catch (error) {
     throw error;
@@ -298,4 +378,5 @@ module.exports = {
   incrementUsage,
   findByKeywordAndUserId,
   findByKeywordAndUserIdFull,
+  updateByIdAndUserId,
 };

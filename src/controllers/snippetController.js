@@ -1,4 +1,5 @@
 const snippetModel = require("../models/snippetModel");
+const { deriveKey, encrypt, decrypt } = require("../utils/crypto");
 
 /**
  * Get all snippets for the authenticated user
@@ -8,11 +9,26 @@ const getAllSnippets = async (req, res) => {
   try {
     const userId = req.user.uid;
 
-    const snippets = await snippetModel.getAllByUserId(userId);
+    const encryptedSnippets = await snippetModel.getAllByUserId(userId);
+    const decrypted = encryptedSnippets.map((s) => {
+      const key = deriveKey(s.keyword, userId);
+      const [enc, tag] = s.value.split(":");
+      const value = decrypt(enc, key, s.iv, tag);
+      return {
+        id: s.id,
+        keyword: s.keyword,
+        iv: s.iv,
+        value,
+        usageCount: s.usageCount,
+        lastUsed: s.lastUsed,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+    });
 
     res.json({
       success: true,
-      snippets,
+      snippets: decrypted,
     });
   } catch (error) {
     console.error("Error fetching snippets:", error);
@@ -68,17 +84,22 @@ const createSnippet = async (req, res) => {
       });
     }
 
+    const key = deriveKey(keyword, userId);
+    const { encrypted, iv, tag } = encrypt(value, key);
     // Create the snippet
     const snippet = await snippetModel.create(userId, {
       keyword: keyword.trim(),
-      value,
+      value: `${encrypted}:${tag}`,
+      iv,
       usageCount,
       lastUsed,
+      orignalValue: value,
     });
 
+    const { orignalValue: _omitCreate, ...safeSnippet } = snippet;
     res.status(201).json({
       success: true,
-      snippet,
+      snippet: safeSnippet,
     });
   } catch (error) {
     console.error("Error creating snippet:", error);
@@ -237,10 +258,23 @@ const getSnippetById = async (req, res) => {
         error: "Snippet not found",
       });
     }
+    const key = deriveKey(snippet.keyword, userId);
+    const [enc, tag] = snippet.value.split(":");
+    const value = decrypt(enc, key, snippet.iv, tag);
 
+    const safeSnippet = {
+      id: snippet.id,
+      keyword: snippet.keyword,
+      iv: snippet.iv,
+      value,
+      usageCount: snippet.usageCount,
+      lastUsed: snippet.lastUsed,
+      createdAt: snippet.createdAt,
+      updatedAt: snippet.updatedAt,
+    };
     res.json({
       success: true,
-      snippet,
+      snippet: safeSnippet,
     });
   } catch (error) {
     console.error("Error fetching snippet:", error);
@@ -326,18 +360,31 @@ const updateSnippet = async (req, res) => {
       }
     }
 
-    // Update using delete and create (simple approach)
-    await snippetModel.deleteByIdAndUserId(snippetId, userId);
-    const updatedSnippet = await snippetModel.create(userId, {
-      keyword: keyword.trim(),
-      value,
-      usageCount: existingSnippet.usageCount,
-      lastUsed: existingSnippet.lastUsed,
-    });
+    // Update the existing snippet
+    const key = deriveKey(keyword, userId);
+    const { encrypted, iv, tag } = encrypt(value, key);
+    const updatedSnippet = await snippetModel.updateByIdAndUserId(
+      snippetId,
+      userId,
+      {
+        keyword: keyword.trim(),
+        value: `${encrypted}:${tag}`,
+        iv,
+        orignalValue: value,
+      }
+    );
 
+    if (!updatedSnippet) {
+      return res.status(404).json({
+        success: false,
+        error: "Snippet not found",
+      });
+    }
+
+    const { orignalValue: _omitUpdate, ...safeUpdated } = updatedSnippet;
     res.json({
       success: true,
-      snippet: updatedSnippet,
+      snippet: safeUpdated,
     });
   } catch (error) {
     console.error("Error updating snippet:", error);
