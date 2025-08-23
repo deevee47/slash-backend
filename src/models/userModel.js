@@ -221,6 +221,7 @@ const getUserStats = async (uid) => {
 const deleteUser = async (uid) => {
   try {
     const result = await User.deleteOne({ uid });
+    //TODO: Delete all snippets associated with the user
 
     if (result.deletedCount > 0) {
       // Create audit log for user deletion
