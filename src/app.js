@@ -42,9 +42,6 @@ const initializeMiddleware = (app) => {
     app.use(requestLogger);
   }
 
-  // Audit logging (should be after request logger but before routes)
-  app.use(auditLogger);
-
   // Security headers
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -58,14 +55,14 @@ const initializeMiddleware = (app) => {
  * Initialize routes for the Express app
  */
 const initializeRoutes = (app) => {
-  // Health check routes (no /api prefix)
+  // Health check routes (no /api prefix, no audit logging)
   app.use("/health", healthRoutes);
 
-  // Auth routes (no /api prefix)
-  app.use("/auth", authRoutes);
+  // Auth routes (with audit logging)
+  app.use("/auth", auditLogger, authRoutes);
 
-  // API routes
-  app.use("/api", apiRoutes);
+  // API routes (with audit logging)
+  app.use("/api", auditLogger, apiRoutes);
 
   // Handle 404 for unknown routes
   app.use("*", (req, res) => {
