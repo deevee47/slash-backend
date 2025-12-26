@@ -81,6 +81,41 @@ const syncUser = async (req, res) => {
 };
 
 /**
+ * Get current authenticated user (for new auth system)
+ * GET /api/user/me
+ */
+const getMe = async (req, res) => {
+  try {
+    // req.userId is set by verifyAccessToken middleware (MongoDB _id)
+    const user = await userModel.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    res.json({
+      user: {
+        firebaseUid: user.firebaseUid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        createdAt: user.createdAt,
+        lastLoginAt: user.lastLoginAt,
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching current user:", error);
+    res.status(500).json({
+      error: "Failed to get user",
+      code: "SERVER_ERROR",
+    });
+  }
+};
+
+/**
  * Get user profile
  * GET /api/user/profile
  */
@@ -206,6 +241,7 @@ const deleteAccount = async (req, res) => {
 };
 
 module.exports = {
+  getMe,
   syncUser,
   getUserProfile,
   getUserStats,

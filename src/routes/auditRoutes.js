@@ -1,11 +1,11 @@
 const express = require("express");
 const auditController = require("../controllers/auditController");
-const { verifyToken } = require("../middleware/auth");
+const verifyAccessToken = require("../middleware/verifyAccessToken");
 
 const router = express.Router();
 
 // Apply authentication middleware to all audit routes
-router.use(verifyToken);
+router.use(verifyAccessToken);
 
 // GET /api/audit/logs - Get audit logs for the authenticated user
 router.get("/logs", auditController.getUserAuditLogs);

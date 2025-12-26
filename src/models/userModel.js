@@ -44,6 +44,32 @@ userSchema.index({ email: 1 }, { unique: true });
 const User = mongoose.model("User", userSchema);
 
 /**
+ * Find user by MongoDB _id
+ */
+const findById = async (userId) => {
+  try {
+    const user = await User.findById(userId).lean();
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user._id.toString(),
+      firebaseUid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      lastLoginAt: user.lastLoginAt,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
  * Find user by Firebase UID
  */
 const findByUid = async (uid) => {
@@ -55,6 +81,7 @@ const findByUid = async (uid) => {
     }
 
     return {
+      id: user._id.toString(),
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
@@ -118,6 +145,7 @@ const syncUser = async (userData) => {
     });
 
     return {
+      id: user._id.toString(),
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
@@ -176,6 +204,7 @@ const updateLastLogin = async (uid) => {
     });
 
     return {
+      id: user._id.toString(),
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
@@ -251,6 +280,7 @@ const deleteUser = async (uid) => {
 };
 
 module.exports = {
+  findById,
   findByUid,
   syncUser,
   updateLastLogin,

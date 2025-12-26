@@ -1,11 +1,11 @@
 const express = require("express");
 const snippetController = require("../controllers/snippetController");
-const { verifyToken } = require("../middleware/auth");
+const verifyAccessToken = require("../middleware/verifyAccessToken");
 
 const router = express.Router();
 
 // Apply authentication middleware to all snippet routes
-router.use(verifyToken);
+router.use(verifyAccessToken);
 
 // GET /api/snippets - Get all snippets for authenticated user
 router.get("/", snippetController.getAllSnippets);

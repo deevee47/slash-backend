@@ -14,6 +14,7 @@ const { errorHandler } = require("./utils/errorHandler");
 // Import routes
 const apiRoutes = require("./routes/index");
 const healthRoutes = require("./routes/healthRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 // Import utilities
 const logger = require("./utils/logger");
@@ -60,27 +61,11 @@ const initializeRoutes = (app) => {
   // Health check routes (no /api prefix)
   app.use("/health", healthRoutes);
 
+  // Auth routes (no /api prefix)
+  app.use("/auth", authRoutes);
+
   // API routes
   app.use("/api", apiRoutes);
-
-  // Root endpoint
-  app.get("/", (req, res) => {
-    res.json({
-      success: true,
-      message: "Slash Backend API",
-      version: process.env.npm_package_version || "1.0.0",
-      architecture: "MVC Pattern with MongoDB",
-      documentation: "/api/docs", // For future API documentation
-      health: "/health",
-      endpoints: {
-        test: "/api/test",
-        snippets: "/api/snippets",
-        user: "/api/user",
-        audit: "/api/audit",
-        health: "/health",
-      },
-    });
-  });
 
   // Handle 404 for unknown routes
   app.use("*", (req, res) => {

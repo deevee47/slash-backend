@@ -1,11 +1,14 @@
 const express = require("express");
 const userController = require("../controllers/userController");
-const { verifyToken } = require("../middleware/auth");
+const verifyAccessToken = require("../middleware/verifyAccessToken");
 
 const router = express.Router();
 
 // Apply authentication middleware to all user routes
-router.use(verifyToken);
+router.use(verifyAccessToken);
+
+// GET /api/user/me - Get current authenticated user
+router.get("/me", userController.getMe);
 
 // POST /api/user/sync - Sync user data on login
 router.post("/sync", userController.syncUser);

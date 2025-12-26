@@ -1,410 +1,143 @@
 # Slash Backend API
 
-Express server API for Chrome extension snippet management with Firebase authentication and MongoDB.
+Express server API for Chrome extension snippet management with **JWT-based authentication**, Firebase integration, and MongoDB.
 
 ## Features
 
-- **Modular MVC Architecture** - Clean separation of concerns with controllers, models, routes, and middleware
-- **Firebase Authentication** - Secure token-based authentication using Firebase ID tokens
-- **MongoDB Database** - Scalable NoSQL database with Mongoose ODM
-- **RESTful API** - Full CRUD operations for snippet management
-- **Usage Analytics** - Track snippet usage count and timestamps
-- **CORS Support** - Browser extension ready configuration
-- **Error Handling** - Comprehensive error handling and logging
-- **Graceful Shutdown** - Proper cleanup of database connections
+- **🔐 JWT Authentication** - Secure token-based auth with access & refresh token rotation
+- **🔥 Firebase Integration** - User identity verification via Firebase ID tokens
+- **🏗️ Modular MVC Architecture** - Clean separation with controllers, models, routes, and middleware
+- **🔒 Encrypted Storage** - Snippet values encrypted at rest using AES-256
+- **📊 Comprehensive Audit Logging** - Track all user actions and API operations
+- **💾 MongoDB Database** - Scalable NoSQL database with Mongoose ODM
+- **🚀 RESTful API** - Full CRUD operations for snippet and user management
+- **📈 Usage Analytics** - Track snippet usage count and timestamps
+- **🌐 CORS Support** - Browser extension ready configuration
+- **⚡ Token Refresh** - Automatic token rotation with secure refresh tokens
+
+## Architecture Overview
+
+### Two-Tier Authentication System
+
+```
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│   Client    │─────▶│   Firebase   │─────▶│   Backend   │
+│  (Extension)│      │ Auth (Google)│      │  (Express)  │
+└─────────────┘      └──────────────┘      └─────────────┘
+       │                                           │
+       │  1. Sign in with Google                   │
+       │  2. Get Firebase ID Token                 │
+       │                                           │
+       │  3. POST /auth/firebase                   │
+       │     Authorization: Bearer <Firebase_Token>│
+       ├───────────────────────────────────────────▶
+       │                                           │
+       │  4. Receive Backend Tokens                │
+       │     {accessToken, refreshToken}           │
+       ◀───────────────────────────────────────────┤
+       │                                           │
+       │  5. API Calls with Access Token           │
+       │     Authorization: Bearer <Access_Token>  │
+       ├───────────────────────────────────────────▶
+       │                                           │
+       │  6. Token expired? Refresh                │
+       │     POST /auth/refresh                    │
+       │     Authorization: Bearer <Refresh_Token> │
+       ├───────────────────────────────────────────▶
+       │                                           │
+       │  7. New tokens (rotation)                 │
+       ◀───────────────────────────────────────────┤
+```
+**WHY TWO TIER?:**
+
+- ✅ **Before:** Clients sent Firebase ID token with every request
+- ✅ **After:** Clients exchange Firebase token once, then use short-lived JWT access tokens
+- ✅ **Why:** Better performance, reduced Firebase API calls, token rotation security
+
+
+### Middleware Chain
+
+```
+Request → CORS → Body Parser → Request Logger → Audit Logger → Security Headers → Routes → Error Handler → Response
+```
+
+### Data Flow
+
+1. **User signs in** with Google/Firebase (frontend handles this)
+2. **Frontend receives** Firebase ID token from Firebase Auth
+3. **Exchange token** at `/auth/firebase` for backend JWT tokens
+4. **Access token** (15 min) used for all API calls
+5. **Refresh token** (180 days) used to get new access tokens
+6. **Logout** revokes refresh token from database
 
 ## Setup
 
-1. **Install dependencies:**
+### 1. Install Dependencies
 
-   ```bash
-   npm install
-   ```
-
-2. **MongoDB Setup:**
-
-   ```bash
-   # Install MongoDB locally or use MongoDB Atlas
-   # Local installation: https://docs.mongodb.com/manual/installation/
-
-   # Or use Docker:
-   docker run -d -p 27017:27017 --name slash-mongodb mongo:latest
-   ```
-
-3. **Firebase Configuration:**
-
-   Option A: Use service account key (recommended for development)
-
-   - Download your Firebase service account key JSON file
-   - Place it in the project root
-   - Set the path in `.env` file:
-     ```
-     FIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccountKey.json
-     ```
-
-   Option B: Use Application Default Credentials
-
-   - Install Google Cloud SDK
-   - Run: `gcloud auth application-default login`
-   - The server will automatically use these credentials
-
-4. **Environment Configuration:**
-
-   ```bash
-   cp env.example .env
-   # Edit .env file with your configuration
-   ```
-
-   **Required environment variables:**
-
-   ```env
-   PORT=5000
-   MONGODB_URI=mongodb://localhost:27017/slash-backend
-   FIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccountKey.json
-   NODE_ENV=development
-   ```
-
-5. **Start the server:**
-
-   ```bash
-   # Development (with auto-restart)
-   npm run dev
-
-   # Production
-   npm start
-   ```
-
-## API Endpoints
-
-### Authentication
-
-All API endpoints require a Firebase ID token in the Authorization header:
-
-```
-Authorization: Bearer {firebase-id-token}
+```bash
+npm install
 ```
 
-### GET /api/snippets
+### 3. Firebase Configuration
 
-Get all snippets for the authenticated user.
+Download your Firebase service account key:
 
-**Response:**
+1. Go to Firebase Console → Project Settings → Service Accounts
+2. Click "Generate New Private Key"
+3. Save as `serviceAccountKey.json` in project root
 
-```json
-{
-  "success": true,
-  "snippets": [
-    {
-      "id": "1",
-      "keyword": "/email",
-      "value": "john.doe@example.com",
-      "usageCount": 5,
-      "lastUsed": "2023-12-01T10:30:00.000Z",
-      "createdAt": "2023-11-01T08:00:00.000Z",
-      "updatedAt": "2023-12-01T10:30:00.000Z"
-    }
-  ]
-}
+To minify the json: 
+
+```bash
+cat serviceAccountKey.json | jq -c
 ```
 
-### POST /api/snippets
 
-Create a new snippet.
+### 4. Environment Configuration
 
-**Request Body:**
+Create `.env` file:
 
-```json
-{
-  "keyword": "/newkeyword",
-  "value": "replacement text"
-}
+```env
+# Server Configuration
+PORT=5000
+NODE_ENV=development
+
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/slash-backend
+
+# Firebase
+FIREBASE_SERVICE_ACCOUNT_KEY="minified-json"
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+REFRESH_TOKEN_SECRET=your-refresh-token-secret-here-generate-a-strong-one
+ACCESS_TOKEN_EXPIRY=900          # 15 minutes in seconds
+REFRESH_TOKEN_EXPIRY=15552000    # 180 days in seconds
 ```
 
-**Response:**
+**⚠️ IMPORTANT**: Generate strong secrets for production:
 
-```json
-{
-  "success": true,
-  "snippet": {
-    "id": "2",
-    "keyword": "/newkeyword",
-    "value": "replacement text",
-    "usageCount": 0,
-    "lastUsed": null,
-    "createdAt": "2023-12-01T11:00:00.000Z",
-    "updatedAt": "2023-12-01T11:00:00.000Z"
-  }
-}
+### 5. Start the Server
+
+```bash
+# Development (with auto-restart)
+npm run dev
+
+# Production
+npm start
 ```
 
-### DELETE /api/snippets/:id
+Server will start on `http://localhost:5000`
 
-Delete a snippet.
 
-**Response:**
+### Security Features
 
-```json
-{
-  "success": true,
-  "message": "Snippet deleted successfully"
-}
-```
+- ✅ **Token Rotation** - Refresh tokens are single-use (invalidated on refresh)
+- ✅ **HMAC-SHA256 Hashing** - Refresh tokens stored hashed, never plaintext
+- ✅ **Short-lived Access** - 15-minute access tokens minimize exposure
+- ✅ **TTL Index** - Expired refresh tokens auto-deleted from database
+- ✅ **Audit Logging** - All auth operations logged for security tracking
 
-### POST /api/snippets/:id/usage
-
-Increment usage count for a snippet.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "usageCount": 6,
-  "lastUsed": "2023-12-01T11:30:00.000Z"
-}
-```
-
-### GET /api/test
-
-Test endpoint for Chrome extension connectivity (requires authentication).
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "Backend is connected and working!",
-  "timestamp": "2023-12-01T11:30:00.000Z",
-  "server": "Express.js with MVC Architecture",
-  "user": {
-    "uid": "firebase-user-id",
-    "email": "user@example.com",
-    "name": "User Name",
-    "emailVerified": true
-  },
-  "environment": "development",
-  "database": "MongoDB",
-  "authentication": "Firebase Admin SDK",
-  "architecture": "MVC Pattern"
-}
-```
-
-## User Management Endpoints
-
-### POST /api/user/sync
-
-Sync user data on login (called automatically by Chrome extension).
-
-**Request Body:**
-
-```json
-{
-  "uid": "firebase-user-id",
-  "email": "user@example.com",
-  "displayName": "User Name",
-  "photoURL": "https://example.com/photo.jpg",
-  "lastLoginAt": "2023-12-01T12:00:00.000Z"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "User synced successfully",
-  "user": {
-    "uid": "firebase-user-id",
-    "email": "user@example.com",
-    "displayName": "User Name",
-    "photoURL": "https://example.com/photo.jpg",
-    "lastLoginAt": "2023-12-01T12:00:00.000Z",
-    "createdAt": "2023-11-01T08:00:00.000Z",
-    "updatedAt": "2023-12-01T12:00:00.000Z"
-  }
-}
-```
-
-### GET /api/user/profile
-
-Get current user profile.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "user": {
-    "uid": "firebase-user-id",
-    "email": "user@example.com",
-    "displayName": "User Name",
-    "photoURL": "https://example.com/photo.jpg",
-    "lastLoginAt": "2023-12-01T12:00:00.000Z",
-    "createdAt": "2023-11-01T08:00:00.000Z",
-    "updatedAt": "2023-12-01T12:00:00.000Z"
-  }
-}
-```
-
-### GET /api/user/stats
-
-Get user statistics.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "stats": {
-    "uid": "firebase-user-id",
-    "email": "user@example.com",
-    "memberSince": "2023-11-01T08:00:00.000Z",
-    "lastLogin": "2023-12-01T12:00:00.000Z"
-  }
-}
-```
-
-### PUT /api/user/login
-
-Update last login time.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "Last login updated",
-  "lastLoginAt": "2023-12-01T12:00:00.000Z"
-}
-```
-
-### DELETE /api/user/account
-
-Delete user account.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "User account deleted successfully"
-}
-```
-
-### GET /health
-
-Health check endpoint (no authentication required).
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "Server is running",
-  "timestamp": "2023-12-01T11:30:00.000Z",
-  "version": "1.0.0",
-  "environment": "development",
-  "database": "connected"
-}
-```
-
-### GET /health/status
-
-Detailed system status endpoint (no authentication required).
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "timestamp": "2023-12-01T11:30:00.000Z",
-  "server": {
-    "uptime": 123.456,
-    "memory": { "rss": 123456, "heapTotal": 123456, "heapUsed": 123456 },
-    "version": "v18.0.0",
-    "platform": "win32",
-    "arch": "x64"
-  },
-  "database": {
-    "status": "connected",
-    "readyState": 1
-  },
-  "environment": {
-    "nodeEnv": "development",
-    "port": 5000
-  }
-}
-```
-
-### PUT /api/snippets/:id
-
-Update a snippet.
-
-**Request Body:**
-
-```json
-{
-  "keyword": "/updated-keyword",
-  "value": "updated replacement text"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "snippet": {
-    "id": "507f1f77bcf86cd799439011",
-    "keyword": "/updated-keyword",
-    "value": "updated replacement text",
-    "usageCount": 5,
-    "lastUsed": "2023-12-01T10:30:00.000Z",
-    "createdAt": "2023-11-01T08:00:00.000Z",
-    "updatedAt": "2023-12-01T11:35:00.000Z"
-  }
-}
-```
-
-### GET /api/snippets/:id
-
-Get a specific snippet by ID.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "snippet": {
-    "id": "507f1f77bcf86cd799439011",
-    "keyword": "/email",
-    "value": "john.doe@example.com",
-    "usageCount": 5,
-    "lastUsed": "2023-12-01T10:30:00.000Z",
-    "createdAt": "2023-11-01T08:00:00.000Z",
-    "updatedAt": "2023-12-01T10:30:00.000Z"
-  }
-}
-```
-
-## Error Responses
-
-All endpoints return error responses in this format:
-
-```json
-{
-  "success": false,
-  "error": "Error message description"
-}
-```
-
-Common HTTP status codes:
-
-- `400` - Bad Request (invalid input)
-- `401` - Unauthorized (invalid/missing token)
-- `404` - Not Found (snippet not found)
-- `409` - Conflict (duplicate keyword)
-- `500` - Internal Server Error
 
 ## Project Structure
 
@@ -412,69 +145,84 @@ Common HTTP status codes:
 slash-backend/
 ├── src/
 │   ├── config/
-│   │   ├── database.js       # MongoDB connection configuration
-│   │   └── firebase.js       # Firebase Admin SDK configuration
+│   │   ├── database.js          # MongoDB connection setup
+│   │   └── firebase.js          # Firebase Admin SDK initialization
+│   │
 │   ├── controllers/
-│   │   ├── snippetController.js  # Snippet business logic
-│   │   └── healthController.js   # Health check endpoints
+│   │   ├── auditController.js   # Audit log query handlers
+│   │   ├── snippetController.js # Snippet CRUD business logic
+│   │   └── userController.js    # User management handlers
+│   │
 │   ├── middleware/
-│   │   ├── auth.js           # Firebase authentication middleware
-│   │   └── requestLogger.js  # Request logging middleware
+│   │   ├── auth.js              # Legacy Firebase auth (not actively used)
+│   │   ├── auditLogger.js       # Request/response audit logging
+│   │   ├── requestLogger.js     # Console request logging
+│   │   └── verifyAccessToken.js # JWT access token verification ⭐
+│   │
 │   ├── models/
-│   │   └── snippetModel.js   # Mongoose schema and data operations
+│   │   ├── auditModel.js        # Audit log schema & queries
+│   │   ├── refreshTokenModel.js # Refresh token storage & rotation ⭐
+│   │   ├── snippetModel.js      # Snippet schema with encryption
+│   │   └── userModel.js         # User schema & sync methods
+│   │
 │   ├── routes/
-│   │   ├── index.js          # Main route aggregator
-│   │   ├── snippetRoutes.js  # Snippet-related routes
-│   │   └── healthRoutes.js   # Health check routes
+│   │   ├── auditRoutes.js       # Audit log endpoints
+│   │   ├── authRoutes.js        # Authentication endpoints ⭐
+│   │   ├── healthRoutes.js      # Health check endpoint
+│   │   ├── index.js             # Route aggregator
+│   │   ├── snippetRoutes.js     # Snippet CRUD routes
+│   │   └── userRoutes.js        # User management routes
+│   │
 │   ├── utils/
-│   │   ├── logger.js         # Logging utility
-│   │   └── errorHandler.js   # Global error handling
-│   └── app.js                # Express application setup
-├── server.js                 # Application entry point
+│   │   ├── errorHandler.js      # Global error handling middleware
+│   │   ├── logger.js            # Logging utilities
+│   │   └── tokenUtils.js        # JWT generation & verification ⭐
+│   │
+│   └── app.js                   # Express app configuration
+│
+├── server.js                    # Application entry point
 ├── package.json
-└── env.example
+├── .env                         # Environment variables (gitignored)
+├── env.example                  # Environment template
+└── serviceAccountKey.json       # Firebase credentials (gitignored)
 ```
 
-## MongoDB Schema
+⭐ = New files for JWT authentication system
 
-The MongoDB database contains the following collections:
+## Security Features
 
-### Snippets Collection
+### 🔐 Authentication & Authorization
 
-```javascript
-{
-  _id: ObjectId,
-  userId: String (required, indexed),
-  keyword: String (required, trimmed),
-  value: String (required),
-  usageCount: Number (default: 0, min: 0),
-  lastUsed: Date (nullable),
-  createdAt: Date (auto-generated),
-  updatedAt: Date (auto-generated)
-}
+- **Two-factor token system** - Firebase validates identity, JWT manages sessions
+- **Short-lived access tokens** - 15-minute expiration minimizes exposure window
+- **Refresh token rotation** - Old refresh tokens invalidated on use (prevents replay attacks)
+- **HMAC-SHA256 hashing** - Refresh tokens stored hashed, never plaintext
+- **TTL auto-cleanup** - Expired tokens automatically removed from database
 
-// Compound unique index on userId + keyword
-db.snippets.createIndex({ userId: 1, keyword: 1 }, { unique: true })
-```
+### 🔒 Data Protection
 
-### Users Collection
+- **AES-256-GCM encryption** - Snippet values encrypted with PBKDF2-derived keys (keyword + userId, 100k iterations)
+- **Per-snippet encryption** - Each snippet encrypted with unique key and IV
+- **Environment secrets** - JWT and refresh token secrets stored in environment variables
+- **HTTPS recommended** - SSL/TLS for production deployments
+- **No plaintext tokens** - Tokens never logged or stored in plaintext
 
-```javascript
-{
-  _id: ObjectId,
-  uid: String (required, unique, indexed),
-  email: String (required, unique, lowercase),
-  displayName: String (nullable),
-  photoURL: String (nullable),
-  lastLoginAt: Date (required),
-  createdAt: Date (auto-generated),
-  updatedAt: Date (auto-generated)
-}
+### 🛡️ Request Security
 
-// Indexes
-db.users.createIndex({ uid: 1 }, { unique: true })
-db.users.createIndex({ email: 1 }, { unique: true })
-```
+- **CORS configuration** - Controlled cross-origin access
+- **Security headers**:
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY`
+  - `X-XSS-Protection: 1; mode=block`
+- **Input validation** - All inputs validated before processing
+- **Rate limiting** - (Recommended: add express-rate-limit for production)
+
+### 📊 Audit & Monitoring
+
+- **Comprehensive audit logging** - All operations logged with timestamps
+- **User action tracking** - Track create, read, update, delete operations
+- **Request/response logging** - Debug and security analysis
+- **Error tracking** - Detailed error logs for debugging
 
 ## Development
 
@@ -484,77 +232,89 @@ db.users.createIndex({ email: 1 }, { unique: true })
 npm run dev
 ```
 
-This uses nodemon to automatically restart the server when files change.
+This uses `nodemon` to automatically restart the server when files change.
 
 ### Testing the API
 
-You can test the API endpoints using curl or any HTTP client. Make sure to include a valid Firebase ID token in the Authorization header.
+#### 1. Get Firebase ID Token
 
-Example:
+You need a Firebase ID token to test. Get one from your frontend or use Firebase SDK:
 
-```bash
-# Health check (no auth required)
-curl http://localhost:5000/health
-
-# Detailed status
-curl http://localhost:5000/health/status
-
-# Get snippets (requires auth)
-curl -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
-     http://localhost:5000/api/snippets
-
-# Test connectivity endpoint (Chrome extension uses this)
-curl -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
-     http://localhost:5000/api/test
-
-# Create snippet (requires auth)
-curl -X POST \
-     -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"keyword":"/test","value":"test value"}' \
-     http://localhost:5000/api/snippets
+```javascript
+// In browser console (if you have Firebase Auth set up)
+firebase.auth().currentUser.getIdToken(true)
+  .then(token => console.log(token));
 ```
 
-### Using the Test Scripts
+#### 2. Test Authentication Flow
 
 ```bash
-# Test basic API functionality with Firebase ID token
-node test-api.js YOUR_FIREBASE_ID_TOKEN
+# Step 1: Exchange Firebase token for backend tokens
+FIREBASE_TOKEN="your-firebase-id-token"
+RESPONSE=$(curl -s -X POST http://localhost:5000/auth/firebase \
+  -H "Authorization: Bearer $FIREBASE_TOKEN")
 
-# Test Chrome extension connectivity endpoint
-node test-api-connection.js YOUR_FIREBASE_ID_TOKEN
+# Extract tokens
+ACCESS_TOKEN=$(echo $RESPONSE | jq -r '.accessToken')
+REFRESH_TOKEN=$(echo $RESPONSE | jq -r '.refreshToken')
 
-# Or use npm scripts
-npm run test YOUR_FIREBASE_ID_TOKEN
-npm run test:connection YOUR_FIREBASE_ID_TOKEN
+echo "Access Token: $ACCESS_TOKEN"
+echo "Refresh Token: $REFRESH_TOKEN"
 ```
 
-## Deployment
+#### 3. Test API Endpoints
 
-For production deployment:
+```bash
+# Get current user
+curl -X GET http://localhost:5000/api/user/me \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 
-1. Set environment variables:
+# Get all snippets
+curl -X GET http://localhost:5000/api/snippets \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 
-   ```bash
-   export NODE_ENV=production
-   export PORT=5000
-   ```
+# Create snippet
+curl -X POST http://localhost:5000/api/snippets \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword": "/test",
+    "value": "This is a test snippet"
+  }'
+```
 
-2. Use a process manager like PM2:
+#### 4. Test Token Refresh
 
-   ```bash
-   npm install -g pm2
-   pm2 start server.js --name "slash-backend"
-   ```
+```bash
+# Refresh access token
+curl -X POST http://localhost:5000/auth/refresh \
+  -H "Authorization: Bearer $REFRESH_TOKEN"
+```
 
-3. Set up a reverse proxy (nginx) if needed
-4. Configure SSL/HTTPS
-5. Set up monitoring and logging
+#### 5. Test Logout
 
-## Security Considerations
+```bash
+# Logout (revoke refresh token)
+curl -X POST http://localhost:5000/auth/logout \
+  -H "Authorization: Bearer $REFRESH_TOKEN"
+```
 
-- Firebase ID tokens are verified on every API request
-- Database queries use parameterized statements to prevent SQL injection
-- CORS is configured to allow browser extension requests
-- Sensitive configuration is stored in environment variables
-- Input validation is performed on all endpoints
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License.
+
+## Support
+
+For issues or questions:
+
+- Open an issue on GitHub
+- Check [BACKEND_AUTH_READY.md](./BACKEND_AUTH_READY.md) for authentication details
+- Review [READY_TO_TEST.md](./READY_TO_TEST.md) for testing instructions
