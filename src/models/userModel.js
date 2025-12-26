@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const auditModel = require("./auditModel");
+const { deriveKey, encrypt } = require("../utils/crypto");
 
 // User Schema
 const userSchema = new mongoose.Schema(
@@ -42,6 +43,54 @@ userSchema.index({ email: 1 }, { unique: true });
 
 // Create the model
 const User = mongoose.model("User", userSchema);
+
+// Lazy load snippet model to avoid circular dependency
+let Snippet;
+const getSnippetModel = () => {
+  if (!Snippet) {
+    Snippet = mongoose.model("Snippet");
+  }
+  return Snippet;
+};
+
+/**
+ * Create default snippets for new users
+ */
+const createDefaultSnippets = async (userId) => {
+  try {
+    const defaultSnippets = [
+      { keyword: "/name", value: "Your Name" },
+      { keyword: "/email", value: "example@gmail.com" },
+      { keyword: "/contact", value: "9477XXXX9" },
+    ];
+
+    const SnippetModel = getSnippetModel();
+    const snippetsToCreate = [];
+
+    for (const snippet of defaultSnippets) {
+      const { keyword, value } = snippet;
+      const key = deriveKey(keyword, userId);
+      const { encrypted, iv, tag } = encrypt(value, key);
+
+      snippetsToCreate.push({
+        userId,
+        keyword,
+        value: `${encrypted}:${tag}`,
+        iv,
+        usageCount: 0,
+        lastUsed: null,
+        orignalValue: value,
+      });
+    }
+
+    await SnippetModel.insertMany(snippetsToCreate);
+
+    console.log(`Created ${snippetsToCreate.length} default snippets for user ${userId}`);
+  } catch (error) {
+    console.error("Error creating default snippets:", error);
+    // Don't throw error - we don't want to fail user creation if snippet creation fails
+  }
+};
 
 /**
  * Find user by MongoDB _id
@@ -102,6 +151,10 @@ const syncUser = async (userData) => {
   try {
     const { uid, email, displayName, photoURL, lastLoginAt } = userData;
 
+    // Check if user exists before update
+    const existingUser = await User.findOne({ uid }).lean();
+    const isNewUser = !existingUser;
+
     const user = await User.findOneAndUpdate(
       { uid }, // Find by UID
       {
@@ -119,6 +172,11 @@ const syncUser = async (userData) => {
       }
     ).lean();
 
+    // Create default snippets for new users
+    if (isNewUser) {
+      await createDefaultSnippets(uid);
+    }
+
     // Create audit log for user sync
     await auditModel.createAuditLog({
       userId: uid,
@@ -132,9 +190,10 @@ const syncUser = async (userData) => {
       status: "success",
       statusCode: 200,
       details: {
-        operation: "upsert",
+        operation: isNewUser ? "create" : "update",
         email: email,
         displayName: displayName,
+        defaultSnippetsCreated: isNewUser,
       },
       requestBody: userData,
       responseData: {
