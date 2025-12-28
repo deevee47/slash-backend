@@ -62,6 +62,7 @@ const createDefaultSnippets = async (userId) => {
       { keyword: "/name", value: "Your Name" },
       { keyword: "/email", value: "example@gmail.com" },
       { keyword: "/contact", value: "9477XXXX9" },
+      { keyword: "/intro", value: "I am Divyansh Vishwakarma and here is more of my work: https://www.itsdivyansh.com" },
     ];
 
     const SnippetModel = getSnippetModel();
